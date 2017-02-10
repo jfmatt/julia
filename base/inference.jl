@@ -3914,29 +3914,38 @@ function invoke_NF(argexprs, etype::ANY, atypes, sv, atype_unlimited::ANY,
     end
 
     if nu > 1
-        spec_hit = nothing
         spec_miss = nothing
         error_label = nothing
-        linfo_var = add_slot!(sv.src, MethodInstance, false)
         ex = Expr(:call)
         ex.args = copy(argexprs)
         ex.typ = etype
         stmts = []
-        arg_hoisted = false
+
+        local ret_var, merge, invoke_ex, spec_hit
+        ret_var = add_slot!(sv.src, widenconst(etype), false)
+        merge = genlabel(sv)
+        invoke_ex = copy(ex)
+        invoke_ex.head = :invoke
+        unshift!(invoke_ex.args, nothing)
+        spec_hit = false
+
+        # linearize the IR by moving the arguments to SSA position
         for i = length(atypes):-1:1
             if i == 1 && !(invoke_texpr === nothing)
                 unshift!(stmts, invoke_texpr)
-                arg_hoisted = true
             end
             ti = atypes[i]
-            if arg_hoisted || isa(ti, Union)
-                aei = ex.args[i]
-                if !effect_free(aei, sv.src, sv.mod, false)
-                    arg_hoisted = true
-                    newvar = newvar!(sv, ti)
-                    unshift!(stmts, :($newvar = $aei))
-                    ex.args[i] = newvar
-                end
+            aei = ex.args[i]
+            if !isa(aei, Slot) &&
+                  !isa(aei, SSAValue) &&
+                  !isa(aei, Symbol) &&
+                  !isa(aei, QuoteNode) &&
+                  !isa(aei, Int) &&
+                  !isa(aei, Type) &&
+                  !isa(aei, GlobalRef)
+                newvar = newvar!(sv, ti)
+                unshift!(stmts, :($newvar = $aei))
+                ex.args[i] = newvar
             end
         end
         invoke_fexpr === nothing || unshift!(stmts, invoke_fexpr)
@@ -3947,9 +3956,11 @@ function invoke_NF(argexprs, etype::ANY, atypes, sv, atype_unlimited::ANY,
                 li === nothing && return false
                 add_backedge!(li, sv)
                 local stmt = []
-                push!(stmt, Expr(:(=), linfo_var, li))
-                spec_hit === nothing && (spec_hit = genlabel(sv))
-                push!(stmt, GotoNode(spec_hit.label))
+                invoke_ex = copy(invoke_ex)
+                invoke_ex.args[1] = li
+                push!(stmt, Expr(:(=), ret_var, invoke_ex))
+                push!(stmt, GotoNode(merge.label))
+                spec_hit = true
                 return stmt
             else
                 local ti = atypes[i]
@@ -3987,30 +3998,18 @@ function invoke_NF(argexprs, etype::ANY, atypes, sv, atype_unlimited::ANY,
             end
         end
         local match = splitunion(atypes, length(atypes))
-        if match !== false && spec_hit !== nothing
+        if match !== false && spec_hit
             append!(stmts, match)
             if error_label !== nothing
                 push!(stmts, error_label)
                 push!(stmts, Expr(:call, GlobalRef(_topmod(sv.mod), :error), "fatal error in type inference (type bound)"))
             end
-            local ret_var, merge
             if spec_miss !== nothing
-                ret_var = add_slot!(sv.src, widenconst(ex.typ), false)
-                merge = genlabel(sv)
                 push!(stmts, spec_miss)
                 push!(stmts, Expr(:(=), ret_var, ex))
                 push!(stmts, GotoNode(merge.label))
-            else
-                ret_var = newvar!(sv, ex.typ)
             end
-            push!(stmts, spec_hit)
-            ex = copy(ex)
-            ex.head = :invoke
-            unshift!(ex.args, linfo_var)
-            push!(stmts, Expr(:(=), ret_var, ex))
-            if spec_miss !== nothing
-                push!(stmts, merge)
-            end
+            push!(stmts, merge)
             return (ret_var, stmts)
         end
     else
