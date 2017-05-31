@@ -537,3 +537,17 @@ let g = Base.Random.GLOBAL_RNG,
     @test srand(m, rand(UInt32, rand(1:10))) === m
     @test srand(m, rand(1:10)) === m
 end
+
+# test randstring API
+let b = ['0':'9';'A':'Z';'a':'z'],
+    c = 'a':'z'
+    for rng = [[], [MersenneTwister(0)]]
+        @test length(randstring(rng...)) == 8
+        @test length(randstring(rng..., 20)) == 20
+        @test issubset(randstring(rng...), b)
+        @test issubset(randstring(rng..., c), c)
+        s = randstring(rng..., c, 20)
+        @test length(s) == 20
+        @test issubset(s, c)
+    end
+end
