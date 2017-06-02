@@ -11,7 +11,7 @@ for S in (String, GenericString)
     @test dirname(S("foo$(sep)bar")) == "foo"
 
     @test expanduser(S("x")) == "x"
-    @test expanduser(S("~")) == (is_windows() ? "~" : homedir())
+    @test expanduser(S("~")) == (iswindows() ? "~" : homedir())
 
     @test isabspath(S(homedir()))
     @test !isabspath(S("foo"))
@@ -68,7 +68,7 @@ for S in (String, GenericString)
     @test joinpath(splitdir(S(homedir()))...) == homedir()
     @test string(splitdrive(S(homedir()))...) == homedir()
 
-    if is_windows()
+    if iswindows()
         @test splitdrive(S("\\\\servername\\hello.world\\filename.ext")) ==
             ("\\\\servername\\hello.world","\\filename.ext")
         @test splitdrive(S("\\\\servername.com\\hello.world\\filename.ext")) ==
@@ -95,8 +95,8 @@ end
 
 @test isabspath("~") == false
 @test isabspath("/") == true # on windows, this is relatively absolute
-@test isabspath("A:/") == is_windows()
-@test isabspath("B:\\") == is_windows()
+@test isabspath("A:/") == iswindows()
+@test isabspath("B:\\") == iswindows()
 @test isabspath("./") == false
 @test isabspath("C:") == false
 @test isabspath("C:.") == false
@@ -104,8 +104,8 @@ end
 @test isabspath(".:/") == false
 #@test isabspath("_:/") == false # FIXME?
 #@test isabspath("AB:/") == false # FIXME?
-@test isabspath("\\\\") == is_windows()
-if is_unix()
+@test isabspath("\\\\") == iswindows()
+if isunix()
     @test isabspath(expanduser("~")) == true
     @test startswith(expanduser("~"), homedir())
 else

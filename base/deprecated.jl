@@ -1421,6 +1421,7 @@ function LibGit2.set_remote_url(path::AbstractString, url::AbstractString; remot
     LibGit2.set_remote_url(path, remote, url)
 end
 
+<<<<<<< HEAD
 module Operators
     for op in [:!, :(!=), :(!==), :%, :&, :*, :+, :-, :/, ://, :<, :<:, :<<, :(<=),
                :<|, :(==), :(===), :>, :>:, :(>=), :>>, :>>>, :\, :^, :colon,
@@ -1484,6 +1485,13 @@ module DSP
 end
 using .DSP
 export conv, conv2, deconv, filt, filt!, xcorr
+
+# PR #22182
+@deprecate is_apple   isapple
+@deprecate is_bsd     isbsd
+@deprecate is_linux   islinux
+@deprecate is_unix    isunix
+@deprecate is_windows iswindows
 
 # END 0.7 deprecations
 

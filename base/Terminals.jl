@@ -115,7 +115,7 @@ cmove_line_up(t::UnixTerminal, n) = (cmove_up(t, n); cmove_col(t, 1))
 cmove_line_down(t::UnixTerminal, n) = (cmove_down(t, n); cmove_col(t, 1))
 cmove_col(t::UnixTerminal, n) = (write(t.out_stream, '\r'); n > 1 && cmove_right(t, n - 1))
 
-if is_windows()
+if iswindows()
     function raw!(t::TTYTerminal,raw::Bool)
         check_open(t.in_stream)
         if Base.ispty(t.in_stream)
@@ -152,7 +152,7 @@ function Base.displaysize(t::UnixTerminal)
     return displaysize(t.out_stream)
 end
 
-if is_windows()
+if iswindows()
     hascolor(t::TTYTerminal) = true
 else
     function hascolor(t::TTYTerminal)
