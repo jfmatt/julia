@@ -722,20 +722,26 @@ static Value *emit_checked_srem_int(Value *x, Value *den, jl_codectx_t *ctx)
 // Temporarily switch the builder to fast-math mode if requested
 struct math_builder {
     FastMathFlags old_fmf;
-    math_builder(jl_codectx_t *ctx, bool always_fast = false):
+    math_builder(jl_codectx_t *ctx, bool always_fast = false, bool contract = false):
         old_fmf(builder.getFastMathFlags())
     {
+        FastMathFlags fmf;
         if (jl_options.fast_math != JL_OPTIONS_FAST_MATH_OFF &&
             (always_fast ||
              jl_options.fast_math == JL_OPTIONS_FAST_MATH_ON)) {
-            FastMathFlags fmf;
             fmf.setUnsafeAlgebra();
-#if JL_LLVM_VERSION >= 30800
-            builder.setFastMathFlags(fmf);
-#else
-            builder.SetFastMathFlags(fmf);
-#endif
         }
+#if JL_LLVM_VERSION >= 50000
+        if (contract)
+            fmf.setAllowContract(true);
+#else
+        assert(!contract);
+#endif
+#if JL_LLVM_VERSION >= 30800
+        builder.setFastMathFlags(fmf);
+#else
+        builder.SetFastMathFlags(fmf);
+#endif
     }
     IRBuilder<>& operator()() const { return builder; }
     ~math_builder() {
@@ -963,7 +969,13 @@ static Value *emit_untyped_intrinsic(intrinsic f, Value **argvalues, size_t narg
 #endif
     }
     case muladd_float: {
-#if JL_LLVM_VERSION >= 30400
+#if JL_LLVM_VERSION >= 50000
+        // LLVM 5.0 can create FMA in the backend for contractable fmul and fadd
+        // Emitting fmul and fadd here since they are easier for other LLVM passes to
+        // optimize.
+        auto mathb = math_builder(ctx, false, true);
+        return mathb().CreateFAdd(mathb().CreateFMul(x, y), z);
+#elif JL_LLVM_VERSION >= 30400
         assert(y->getType() == x->getType());
         assert(z->getType() == y->getType());
         Value *muladdintr = Intrinsic::getDeclaration(jl_Module, Intrinsic::fmuladd, makeArrayRef(t));
