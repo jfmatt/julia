@@ -106,6 +106,9 @@ Deprecated or removed
   * The `Operators` module is deprecated. Instead, import required operators explicitly
     from `Base`, e.g. `import Base: +, -, *, /` ([#22251]).
 
+  * The method `replace(s::AbstractString, pat, r, count)` with `count <= 0` is deprecated
+    in favor of `replace(s::AbstractString, pat, r, typemax(Int))` ([#22325]).
+
 
 Julia v0.6.0 Release Notes
 ==========================
