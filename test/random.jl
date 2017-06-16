@@ -537,3 +537,6 @@ let g = Base.Random.GLOBAL_RNG,
     @test srand(m, rand(UInt32, rand(1:10))) === m
     @test srand(m, rand(1:10)) === m
 end
+
+# this shouldn't crash (#22403)
+@test_throws MethodError rand!(Union{UInt,Int}[1, 2, 3]) isa Vector{Union{UInt,Int}}
