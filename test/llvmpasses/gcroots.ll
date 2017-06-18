@@ -28,7 +28,7 @@ top:
     ret void
 }
 
-define void @leftover_alloca(%jl_value_t addrspace(10)*%a) {
+define void @leftover_alloca(%jl_value_t addrspace(10)* %a) {
 ; If this pass encounters an alloca, it'll just sink it into the gcframe,
 ; relying on mem2reg to catch simple cases such as this earlier
 ; CHECK-LABEL: @leftover_alloca

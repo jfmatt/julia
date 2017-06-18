@@ -252,6 +252,10 @@ struct State {
     // The result of the local analysis
     std::map<BasicBlock *, BBState> BBStates;
 
+    // Load refinement map. All uses of the keys can be combined with uses
+    // of the value (but not the other way around).
+    std::map<int, int> LoadRefinements;
+
     // The assignment of numbers to safepoints. The indices in the map
     // are indices into the next three maps which store safepoint properties
     std::map<Instruction *, int> SafepointNumbering;
@@ -303,7 +307,7 @@ private:
     Function *pointer_from_objref_func;
     CallInst *ptlsStates;
 
-    void MaybeNoteDef(State &S, BBState &BBS, Value *Def, const std::vector<int> &SafepointsSoFar);
+    void MaybeNoteDef(State &S, BBState &BBS, Value *Def, const std::vector<int> &SafepointsSoFar, int RefinedPtr = -2);
     void NoteUse(State &S, BBState &BBS, Value *V, BitVector &Uses);
     void NoteUse(State &S, BBState &BBS, Value *V) {
         NoteUse(S, BBS, V, BBS.UpExposedUses);
@@ -542,7 +546,7 @@ static void NoteDef(State &S, BBState &BBS, int Num, const std::vector<int> &Saf
     }
 }
 
-void LateLowerGCFrame::MaybeNoteDef(State &S, BBState &BBS, Value *Def, const std::vector<int> &SafepointsSoFar) {
+void LateLowerGCFrame::MaybeNoteDef(State &S, BBState &BBS, Value *Def, const std::vector<int> &SafepointsSoFar, int RefinedPtr) {
     int Num = -1;
     Type *RT = Def->getType();
     if (isSpecialPtr(RT)) {
@@ -558,6 +562,8 @@ void LateLowerGCFrame::MaybeNoteDef(State &S, BBState &BBS, Value *Def, const st
         std::vector<int> Nums = NumberVector(S, Def);
         for (int Num : Nums) {
             NoteDef(S, BBS, Num, SafepointsSoFar);
+            if (RefinedPtr != -2)
+                S.LoadRefinements[Num] = RefinedPtr;
         }
         return;
     }
@@ -565,6 +571,8 @@ void LateLowerGCFrame::MaybeNoteDef(State &S, BBState &BBS, Value *Def, const st
         return;
     }
     NoteDef(S, BBS, Num, SafepointsSoFar);
+    if (RefinedPtr != -2)
+        S.LoadRefinements[Num] = RefinedPtr;
 }
 
 static int NoteSafepoint(State &S, BBState &BBS, CallInst *CI) {
@@ -667,6 +675,23 @@ JL_USED_FUNC static void dumpLivenessState(Function &F, State &S) {
     }
 }
 
+// Check if this is a load form an immutable value. The easiest
+// way to do so is to look at the tbaa and see if it derives from
+// jt_immut.
+static bool isLoadFromImmut(LoadInst *LI)
+{
+    MDNode *TBAA = LI->getMetadata(LLVMContext::MD_tbaa);
+    if (!TBAA)
+        return false;
+    while (TBAA->getNumOperands() > 1) {
+        TBAA = cast<MDNode>(TBAA->getOperand(1).get());
+        if (cast<MDString>(TBAA->getOperand(0))->getString() == "jtbaa_immut") {
+            return true;
+        }
+    }
+    return false;
+}
+
 State LateLowerGCFrame::LocalScan(Function &F) {
     State S;
     for (BasicBlock &BB : F) {
@@ -692,8 +717,16 @@ State LateLowerGCFrame::LocalScan(Function &F) {
                 BBS.TopmostSafepoint = SafepointNumber;
                 BBS.Safepoints.push_back(SafepointNumber);
             } else if (LoadInst *LI = dyn_cast<LoadInst>(&I)) {
-                // Allocas get sunk into the gc frame, so don't generate defs
-                MaybeNoteDef(S, BBS, LI, BBS.Safepoints);
+                // If this is a load from an immutable, we know that
+                // this object will always be rooted as long as the
+                // object we're loading from is, so we can refine uses
+                // of this object to uses of the object we're loading
+                // from.
+                int RefinedPtr = -1;
+                if (isLoadFromImmut(LI) && isSpecialPtr(LI->getPointerOperand()->getType())) {
+                    RefinedPtr = Number(S, LI->getPointerOperand());
+                }
+                MaybeNoteDef(S, BBS, LI, BBS.Safepoints, RefinedPtr);
                 NoteOperandUses(S, BBS, I, BBS.UpExposedUsesUnrooted);
             } else if (SelectInst *SI = dyn_cast<SelectInst>(&I)) {
                 // We need to insert an extra select for the GC root
@@ -815,10 +848,19 @@ void LateLowerGCFrame::ComputeLiveSets(Function &F, State &S) {
         BBState &BBS = S.BBStates[BB];
         BitVector LiveAcross = BBS.LiveIn;
         LiveAcross &= BBS.LiveOut;
-        S.LiveSets[idx] |= LiveAcross;
+        BitVector &LS = S.LiveSets[idx];
+        LS |= LiveAcross;
         for (int Live : S.LiveIfLiveOut[idx]) {
             if (HasBitSet(BBS.LiveOut, Live))
-                S.LiveSets[idx][Live] = 1;
+                LS[Live] = 1;
+        }
+        // Apply refinements
+        for (int Idx = LS.find_first(); Idx >= 0; Idx = LS.find_next(Idx)) {
+            if (!S.LoadRefinements.count(Idx))
+                continue;
+            int RefinedPtr = S.LoadRefinements[Idx];
+            if (RefinedPtr == -1 || HasBitSet(LS, RefinedPtr))
+                LS[Idx] = 0;
         }
     }
     // Compute the interference graph
